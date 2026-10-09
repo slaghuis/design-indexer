@@ -1,0 +1,39 @@
+sources:
+  - name: central
+    root: ~/code/design-docs
+    include_patterns: ["**/*.md"]
+    exclude_patterns: ["**/node_modules/**", "**/.git/**"]
+    adr_glob: "adr/**/*.md"
+
+  - name: myservice
+    root: ~/code/services/myservice
+    include_patterns:
+      - "README.md"
+      - "docs/**/*.md"
+      - "ADR/**/*.md"
+    adr_glob: "ADR/**/*.md"
+
+  - name: payments
+    root: ~/code/services/payments
+    include_patterns:
+      - "README.md"
+      - "docs/**/*.md"
+      - "ADR/**/*.md"
+    adr_glob: "ADR/**/*.md"
+
+qdrant:
+  host: localhost
+  port: 6334
+  collection: design_docs
+  dim: 1024                 # bge-m3
+
+ollama:
+  base_url: http://localhost:11434
+  model: bge-m3             # better for prose than nomic-embed-text
+
+chunking:
+  max_tokens: 500           # ~2000 chars; big enough for a decision
+  min_tokens: 50
+  overlap_tokens: 60
+
+concurrency: 4
