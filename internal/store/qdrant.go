@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/qdrant/go-client/qdrant"
 
@@ -34,27 +35,37 @@ func (q *Qdrant) ensureCollection(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if exists {
-		return nil
+	if !exists {
+		if err := q.client.CreateCollection(ctx, &qdrant.CreateCollection{
+			CollectionName: q.collection,
+			VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
+				Size:     q.dim,
+				Distance: qdrant.Distance_Cosine,
+			}),
+		}); err != nil {
+			return err
+		}
 	}
-	if err := q.client.CreateCollection(ctx, &qdrant.CreateCollection{
-		CollectionName: q.collection,
-		VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
-			Size:     q.dim,
-			Distance: qdrant.Distance_Cosine,
-		}),
-	}); err != nil {
-		return err
-	}
-	// Field indexes for fast filtering
+	return q.ensureFieldIndexes(ctx)
+}
+
+func (q *Qdrant) ensureFieldIndexes(ctx context.Context) error {
 	for _, f := range []string{"source", "kind", "adr_id", "status"} {
-		_ = q.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
+		_, err := q.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
 			CollectionName: q.collection,
 			FieldName:      f,
-			FieldType:      qdrant.NewFieldTypeKeyword(),
+			FieldType:      qdrant.FieldType_FieldTypeKeyword.Enum(),
 		})
+		if err != nil && !indexAlreadyExists(err) {
+			return fmt.Errorf("index field %s: %w", f, err)
+		}
 	}
 	return nil
+}
+
+func indexAlreadyExists(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "already exists") || strings.Contains(msg, "already has an index")
 }
 
 func pointID(source, path string, chunkIndex int) string {
@@ -64,25 +75,34 @@ func pointID(source, path string, chunkIndex int) string {
 		hx[0:8], hx[8:12], hx[12:16], hx[16:20], hx[20:32])
 }
 
+func chunkPayload(c parser.Chunk) map[string]*qdrant.Value {
+	d := c.Doc
+	tags := make([]any, len(d.Frontmatter.Tags))
+	for i, tag := range d.Frontmatter.Tags {
+		tags[i] = tag
+	}
+	return qdrant.NewValueMap(map[string]any{
+		"source":       d.Source,
+		"path":         d.Path,
+		"kind":         d.Kind,
+		"title":        d.Title,
+		"adr_id":       d.Frontmatter.ID,
+		"status":       d.Frontmatter.Status,
+		"tags":         tags,
+		"section_path": c.SectionPath,
+		"heading":      c.Heading,
+		"text":         c.Text,
+		"start_line":   c.StartLine,
+		"end_line":     c.EndLine,
+		"chunk_index":  c.ChunkIndex,
+		"hash":         c.Hash,
+		"doc_hash":     d.Hash,
+	})
+}
+
 func (q *Qdrant) Upsert(ctx context.Context, c parser.Chunk, vec []float32) error {
 	d := c.Doc
-	payload := qdrant.NewValueMap(map[string]any{
-		"source":        d.Source,
-		"path":          d.Path,
-		"kind":          d.Kind,
-		"title":         d.Title,
-		"adr_id":        d.Frontmatter.ID,
-		"status":        d.Frontmatter.Status,
-		"tags":          d.Frontmatter.Tags,
-		"section_path":  c.SectionPath,
-		"heading":       c.Heading,
-		"text":          c.Text,
-		"start_line":    c.StartLine,
-		"end_line":      c.EndLine,
-		"chunk_index":   c.ChunkIndex,
-		"hash":          c.Hash,
-		"doc_hash":      d.Hash,
-	})
+	payload := chunkPayload(c)
 
 	_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
 		CollectionName: q.collection,
@@ -119,6 +139,25 @@ func (q *Qdrant) ExistingDocHash(ctx context.Context, source, path string) (stri
 		return v.GetStringValue(), nil
 	}
 	return "", nil
+}
+
+// ChunkCount returns how many points are stored for this document.
+func (q *Qdrant) ChunkCount(ctx context.Context, source, path string) (int, error) {
+	exact := true
+	n, err := q.client.Count(ctx, &qdrant.CountPoints{
+		CollectionName: q.collection,
+		Filter: &qdrant.Filter{
+			Must: []*qdrant.Condition{
+				qdrant.NewMatch("source", source),
+				qdrant.NewMatch("path", path),
+			},
+		},
+		Exact: &exact,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
 }
 
 // DeleteDoc removes all chunks for a document.

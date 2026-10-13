@@ -51,7 +51,7 @@ func Walk(src Source) ([]FileRef, error) {
 			return nil
 		}
 		if d.IsDir() {
-			if shouldSkipDir(d.Name()) {
+			if SkipDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -60,10 +60,7 @@ func Walk(src Source) ([]FileRef, error) {
 		if err != nil {
 			return nil
 		}
-		if !matchAny(rel, src.IncludePatterns, true) {
-			return nil
-		}
-		if matchAny(rel, src.ExcludePatterns, false) {
+		if !src.Includes(rel) {
 			return nil
 		}
 		out = append(out, FileRef{Source: src.Name, AbsPath: path, RelPath: rel})
@@ -72,26 +69,75 @@ func Walk(src Source) ([]FileRef, error) {
 	return out, err
 }
 
+// Includes reports whether rel matches this source's include patterns and
+// none of its exclude patterns. Patterns use slash separators and support **.
+func (s Source) Includes(rel string) bool {
+	rel = filepath.ToSlash(rel)
+	if !matchAny(rel, s.IncludePatterns, true) {
+		return false
+	}
+	return !matchAny(rel, s.ExcludePatterns, false)
+}
+
+// Match reports whether path matches a slash-separated glob. ** matches
+// across directories, including zero directories.
+func Match(path, pattern string) bool {
+	path = strings.Trim(filepath.ToSlash(path), "/")
+	pattern = strings.Trim(filepath.ToSlash(pattern), "/")
+	return matchSegs(splitSegs(path), splitSegs(pattern))
+}
+
 func matchAny(path string, patterns []string, defaultIfEmpty bool) bool {
 	if len(patterns) == 0 {
 		return defaultIfEmpty
 	}
 	for _, p := range patterns {
-		ok, _ := filepath.Match(p, path)
-		if ok {
+		if Match(path, p) {
 			return true
-		}
-		// support **/ prefix as substring match
-		if strings.Contains(p, "**/") {
-			if strings.HasSuffix(path, strings.TrimPrefix(p, "**/")) {
-				return true
-			}
 		}
 	}
 	return false
 }
 
-func shouldSkipDir(name string) bool {
+func splitSegs(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "/")
+}
+
+func matchSegs(path, pat []string) bool {
+	for {
+		if len(pat) == 0 {
+			return len(path) == 0
+		}
+		if pat[0] == "**" {
+			for len(pat) > 1 && pat[1] == "**" {
+				pat = pat[1:]
+			}
+			if matchSegs(path, pat[1:]) {
+				return true
+			}
+			if len(path) == 0 {
+				return false
+			}
+			path = path[1:]
+			continue
+		}
+		if len(path) == 0 {
+			return false
+		}
+		ok, err := filepath.Match(pat[0], path[0])
+		if err != nil || !ok {
+			return false
+		}
+		path = path[1:]
+		pat = pat[1:]
+	}
+}
+
+// SkipDir reports directories the walker never descends into.
+func SkipDir(name string) bool {
 	switch name {
 	case ".git", "node_modules", "vendor", "dist", "bin", ".idea", ".vscode":
 		return true

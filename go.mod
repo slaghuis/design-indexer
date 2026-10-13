@@ -3,9 +3,17 @@ module github.com/slaghuis/design-indexer
 go 1.23
 
 require (
-    github.com/qdrant/go-client v1.12.0
-    github.com/yuin/goldmark v1.7.4
-    github.com/fsnotify/fsnotify v1.7.0
-    gopkg.in/yaml.v3 v3.0.1
-    golang.org/x/sync v0.8.0
+	github.com/fsnotify/fsnotify v1.7.0
+	github.com/qdrant/go-client v1.12.0
+	golang.org/x/sync v0.8.0
+	gopkg.in/yaml.v3 v3.0.1
+)
+
+require (
+	golang.org/x/net v0.28.0 // indirect
+	golang.org/x/sys v0.24.0 // indirect
+	golang.org/x/text v0.17.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240827150818-7e3bb234dfed // indirect
+	google.golang.org/grpc v1.66.0 // indirect
+	google.golang.org/protobuf v1.34.2 // indirect
 )
